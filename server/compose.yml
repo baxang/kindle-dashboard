@@ -1,0 +1,10 @@
+services:
+  dash:
+    build: .
+    ports: ["8090:8080"]
+    env_file: ../.env # NSW_TRANSPORT_OPENDATA_API
+    environment:
+      TZ: Australia/Sydney
+    init: true # reaps the Chrome processes started on each render
+    shm_size: 1gb
+    restart: unless-stopped

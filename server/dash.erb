@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  /* e-ink: black on white, big type, thick rules, no greys or gradients */
+  html, body { margin: 0; width: 758px; height: 1024px; overflow: hidden; background: #fff; color: #000; }
+  body { font-family: "DejaVu Sans", sans-serif; padding: 36px; box-sizing: border-box; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .time { font-size: 104px; font-weight: bold; line-height: 1; }
+  .wx { text-align: right; font-size: 30px; }
+  .wxtext { max-width: 300px; margin-left: auto; }
+  .date { font-size: 36px; margin-top: 8px; }
+  h2 { font-size: 30px; margin: 26px 0 8px; padding-bottom: 6px; border-bottom: 4px solid #000; }
+  .big { font-size: 64px; font-weight: bold; }
+  .row { display: flex; justify-content: space-between; font-size: 32px; padding: 6px 0; }
+  .asof { font-size: 22px; font-weight: normal; }
+  .trains { width: 100%; border-collapse: collapse; font-size: 46px; }
+  .trains th { font-size: 22px; text-align: left; padding: 0 0 4px; vertical-align: bottom; }
+  .trains td { padding: 7px 0; border-bottom: 1px solid #000; white-space: nowrap; }
+  .trains th:not(:first-child), .trains td:not(:first-child) { text-align: right; }
+  .trains .in { font-size: 24px; }
+  .trains td + td { padding-left: 18px; }
+  .trains tr.next td { padding-top: 10px; padding-bottom: 10px; }
+  .trains tr.next td:first-child { font-size: 66px; }
+  .trains tr.next .in { font-size: 28px; }
+  .feels { font-size: 30px; font-weight: normal; } /* sits inside .big */
+  .fc { margin-top: 28px; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; text-align: center; font-size: 26px; line-height: 1.25; }
+  .fc svg { width: 96px; height: 96px; margin: 2px 0; }
+  .fc .hi { font-size: 38px; font-weight: bold; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <div class="time"><%= now.strftime("%H:%M") %></div>
+      <div class="date"><%= now.strftime("%a %-d %B") %></div>
+    </div>
+    <% if weather %>
+      <div class="wx">
+        <div class="big"><%= weather[:now] %>° <span class="feels">feels <%= weather[:feels] %>°</span></div>
+        <% if weather[:min] && weather[:max] %><div><%= weather[:min] %>° – <%= weather[:max] %>°</div>
+        <% elsif weather[:max] %><div>High <%= weather[:max] %>°</div><% end %>
+        <% if weather[:text] %><div class="wxtext"><%= weather[:text] %></div><% end %>
+        <% if weather[:stale] %><div class="asof">as of <%= weather[:at].strftime("%H:%M") %></div><% end %>
+      </div>
+    <% else %>
+      <div class="wx">Weather<br>unavailable</div>
+    <% end %>
+  </div>
+
+  <% if weather %>
+    <%# Icons in the style of the BOM app, drawn from parts. Key: BOM forecast_icon_code. %>
+    <% icons = { 1 => %w[sunbig], 2 => %w[sunbig], 3 => %w[sun cloud], 4 => %w[cloud], 6 => %w[sunbig haze], 8 => %w[cloud drizzle],
+                 9 => %w[haze], 10 => %w[cloud haze], 11 => %w[sun cloud rain], 12 => %w[cloud rain], 13 => %w[haze], 14 => %w[snow],
+                 15 => %w[cloud snow], 16 => %w[cloud bolt], 17 => %w[sun cloud drizzle], 18 => %w[sun cloud rain], 19 => %w[cloud bolt] } %>
+    <svg width="0" height="0" style="position:absolute">
+      <g id="sunbig"><circle cx="32" cy="28" r="17" fill="#bbb" stroke="#000" stroke-width="2.5"/></g>
+      <g id="sun"><circle cx="47" cy="16" r="13" fill="#bbb" stroke="#000" stroke-width="2.5"/></g>
+      <g id="cloud"><path d="M14 44a10 10 0 0 1 0-20a14 14 0 0 1 26-6a10 10 0 0 1 12 12a7 7 0 0 1-2 14z" fill="#fff" stroke="#000" stroke-width="2.5"/></g>
+      <% line = 'stroke="#000" stroke-width="3" stroke-linecap="round" fill="none"' %>
+      <g id="drizzle" <%= line %>><path d="M26 51l-2 7M38 51l-2 7"/></g>
+      <g id="rain" <%= line %>><path d="M21 51l-3 9M31 51l-3 9M41 51l-3 9"/></g>
+      <g id="haze" <%= line %>><path d="M8 52h20M34 52h22M14 59h36"/></g>
+      <g id="snow" <%= line %>><path d="M22 52v7M18.5 55.5h7M40 52v7M36.5 55.5h7"/></g>
+      <g id="bolt"><path d="M35 45l-11 11h8l-5 8 13-12h-8l5-7z" fill="#000"/></g>
+    </svg>
+    <div class="fc">
+      <% weather[:days].each do |d| %>
+        <div>
+          <div><b><%= d[:day].strftime("%a") %></b> <%= d[:day].day %></div>
+          <svg viewBox="0 0 64 64"><% icons.fetch(d[:icon], []).each do |part| %><use href="#<%= part %>"/><% end %></svg>
+          <div class="hi"><%= d[:max] %>°</div>
+          <div><%= d[:min] %>°</div>
+          <div><%= d[:rain] %></div>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
+
+  <h2><%= TRAIN_STOPS[0][1] %> → <%= TRAIN_STOPS[-1][1] %></h2>
+  <% if trains.nil? %><div class="row">Trains unavailable</div>
+  <% elsif trains.empty? %><div class="row">No trains soon</div>
+  <% else hm = ->(t) { t ? t.strftime("%H:%M") : "—" } %>
+    <table class="trains">
+      <tr><% TRAIN_STOPS.each do |_, label| %><th><%= label %></th><% end %></tr>
+      <% trains.each_with_index do |t, i| %>
+        <tr class="<%= "next" if i.zero? %>"><td><b><%= hm.(t[:dep]) %></b> <small class="in"><%= (m = ((t[:dep] - now) / 60).floor) < 1 ? "now" : "#{m} min" %></small></td><% t[:arrivals].each do |a| %><td><%= hm.(a) %></td><% end %></tr>
+      <% end %>
+    </table>
+  <% end %>
+</body>
+</html>
