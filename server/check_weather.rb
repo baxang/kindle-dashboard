@@ -1,5 +1,5 @@
 # Self-check for the stale-weather fallback. Run: docker exec -i server-dash-1 ruby < check_weather.rb
-eval(File.read("/app/app.rb").split("server = WEBrick").first, binding, "/app/app.rb")
+require "/app/app.rb"
 def fetch_weather = nil # simulate BOM being down
 
 y, t = Date.today - 1, Date.today

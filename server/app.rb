@@ -18,6 +18,7 @@ BOM_OBS_FILE, BOM_STATION = ENV.fetch("BOM_OBS_FILE"), ENV.fetch("BOM_STATION")
 # "id:Label,id:Label,...": the first stop is where you board, the last is the query destination,
 # and every stop after the first gets an arrival-time column.
 TRAIN_STOPS = ENV.fetch("TRAIN_STOPS").split(",").map { |s| s.strip.split(":", 2) }
+WALK_MIN = Integer(ENV.fetch("WALK_MIN", 3)) # minutes to walk to the first stop; trains sooner than this can't be caught
 
 # Refetched every 10 min. If a fetch fails, the last good result is shown for up to a day,
 # marked stale after 30 min so the screen says "as of HH:MM".
@@ -30,24 +31,26 @@ def weather
                  days: @weather[:days].select { |d| d[:day] > today }.first(5), stale: Time.now - @weather[:at] > 1800)
 end
 
-# BOM's anonymous FTP is its documented channel for automated downloads.
-def bom_get(file)
-  xml = Net::FTP.open("ftp.bom.gov.au", username: "anonymous", open_timeout: 5, read_timeout: 15) do |ftp|
-    ftp.getbinaryfile("/anon/gen/fwo/#{file}.xml", nil)
+# BOM's anonymous FTP is its documented channel for automated downloads. One login fetches all files.
+def bom_get(*files)
+  Net::FTP.open("ftp.bom.gov.au", username: "anonymous", open_timeout: 5, read_timeout: 15) do |ftp|
+    files.map { |f| REXML::Document.new(ftp.getbinaryfile("/anon/gen/fwo/#{f}.xml", nil)) }
   end
-  REXML::Document.new(xml)
 end
 
+def bom_val(node, type) = node.elements[".//*[@type='#{type}']"]&.text
+
 def fetch_weather
-  area = bom_get(BOM_FORECAST_FILE).elements["//area[@description='#{BOM_FORECAST_AREA}']"] or raise "no forecast for #{BOM_FORECAST_AREA}"
+  forecast, readings = bom_get(BOM_FORECAST_FILE, BOM_OBS_FILE)
+  area = forecast.elements["//area[@description='#{BOM_FORECAST_AREA}']"] or raise "no forecast for #{BOM_FORECAST_AREA}"
   days = area.get_elements("forecast-period").map do |p|
-    v = ->(type) { p.elements["*[@type='#{type}']"]&.text }
+    v = ->(type) { bom_val(p, type) }
     { day: Date.parse(p.attributes["start-time-local"]), text: v.("precis")&.chomp("."), icon: v.("forecast_icon_code")&.to_i,
       min: v.("air_temperature_minimum")&.to_i, max: v.("air_temperature_maximum")&.to_i, # today's go missing later in the day
       rain: v.("probability_of_precipitation") }
   end
-  obs = bom_get(BOM_OBS_FILE).elements["//station[@description='#{BOM_STATION}']/period"] or raise "no readings for #{BOM_STATION}"
-  reading = ->(type) { obs.elements[".//element[@type='#{type}']"].text.to_f.round }
+  obs = readings.elements["//station[@description='#{BOM_STATION}']/period"] or raise "no readings for #{BOM_STATION}"
+  reading = ->(type) { Float(bom_val(obs, type)).round } # a missing reading fails the fetch, keeping the last good one
   @weather = { now: reading.("air_temperature"), feels: reading.("apparent_temp"), days:, at: Time.now }
 rescue => e
   warn "weather: #{e.class}: #{e.message}" # keep the previous @weather
@@ -63,24 +66,27 @@ end
 def at(point, kind) = Time.parse(point["#{kind}TimeEstimated"] || point["#{kind}TimePlanned"]).localtime
 
 # Next trains from the first stop that run through to the last one, with arrival times at the other stops.
-def trains(limit)
+def trains
   journeys = tfnsw("trip", depArrMacro: "dep", type_origin: "any", name_origin: TRAIN_STOPS[0][0], type_destination: "any",
-                           name_destination: TRAIN_STOPS[-1][0], calcNumberOfTrips: 6, TfNSWTR: true)["journeys"]
+                           name_destination: TRAIN_STOPS[-1][0], calcNumberOfTrips: 8, TfNSWTR: true)["journeys"] # 10 is ~2x slower; 8 leaves spares after the walk filter
   journeys.filter_map do |j|
     leg = j["legs"][0]
     next unless j["legs"].size == 1 && leg.dig("transportation", "product", "class") == 1 # one train, no change
     arrive = ->(id) { s = leg["stopSequence"].to_a.find { |s| s.dig("parent", "id") == id }; s && at(s, "arrival") }
     { dep: at(leg["origin"], "departure"), arrivals: TRAIN_STOPS.drop(1).map { |id, _| arrive.(id) } }
-  end.uniq { |t| t[:dep] }.sort_by { |t| t[:dep] }.first(limit)
+  end.uniq { |t| t[:dep] }.sort_by { |t| t[:dep] }
 rescue => e
   warn "trains: #{e.class}: #{e.message}"
   nil
 end
 
-def html = TEMPLATE.result_with_hash(now: Time.now, weather: weather, trains: trains(3))
+def html(now = Time.now)
+  reachable = trains&.reject { |t| t[:dep] - now < WALK_MIN * 60 }
+  TEMPLATE.result_with_hash(now:, weather:, trains: reachable&.first(5))
+end
 
 def render_png
-  browser = Ferrum::Browser.new(window_size: [W, H], process_timeout: 30,
+  browser = Ferrum::Browser.new(window_size: [W, H], process_timeout: 30, timeout: 30, # page load includes data fetches
                                 browser_options: { "no-sandbox" => nil, "disable-dev-shm-usage" => nil })
   browser.resize(width: W, height: H) # window_size includes browser chrome; this sets the viewport
   browser.goto("http://127.0.0.1:#{PORT}/")
@@ -97,8 +103,10 @@ ensure
   browser&.quit
 end
 
-server = WEBrick::HTTPServer.new(Port: PORT)
-server.mount_proc("/") { |_, res| res.content_type = "text/html; charset=utf-8"; res.body = html }
-server.mount_proc("/dash.png") { |_, res| res.content_type = "image/png"; res.body = render_png }
-%w[INT TERM].each { |s| trap(s) { server.shutdown } }
-server.start
+if $0 == __FILE__ # the check_*.rb scripts require this file without starting the server
+  server = WEBrick::HTTPServer.new(Port: PORT)
+  server.mount_proc("/") { |_, res| res.content_type = "text/html; charset=utf-8"; res.body = html }
+  server.mount_proc("/dash.png") { |_, res| res.content_type = "image/png"; res.body = render_png }
+  %w[INT TERM].each { |s| trap(s) { server.shutdown } }
+  server.start
+end

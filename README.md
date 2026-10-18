@@ -6,7 +6,7 @@ image, and the Kindle downloads and shows it at the start of every minute.
 The screen shows:
 - time and date;
 - current weather and a 5-day forecast from the Bureau of Meteorology (BOM);
-- the next 3 trains on a Sydney Trains route, with arrival times at up to two later stops (Transport for NSW).
+- the next 5 trains you can still walk to on a Sydney Trains route, with arrival times at up to two later stops (Transport for NSW).
 
 <img src="docs/screenshot.png" width="380" alt="Dashboard: clock, current weather, 5-day forecast with icons, and the next three trains from West Ryde with Central and Town Hall arrival times">
 
@@ -20,7 +20,7 @@ server (Docker)                                 Kindle
 │ server/, port 8090               │            │ /mnt/us/dash/run.sh          │
 │  GET /         → HTML dashboard  │  ◄── wget  │  each new minute, or on tap: │
 │  GET /dash.png → headless Chrome │    PNG ──► │  fetch dash.png, draw (eips) │
-│    screenshot, 8-bit greyscale   │            │  tap the clock → exit        │
+│    screenshot, 8-bit greyscale   │            │  clock, then EXIT → exit     │
 │  data: TfNSW trip API,           │            └──────────────────────────────┘
 │        BOM forecast + station    │
 └──────────────────────────────────┘
@@ -36,6 +36,7 @@ All drawing happens on the server. The Kindle is too slow to render anything its
 | `server/dash.erb` | Dashboard layout (HTML/CSS). Edit this to change what's shown |
 | `server/compose.yml`, `Dockerfile` | Docker setup. Host port **8090**; change it in `compose.yml` |
 | `server/check_weather.rb` | Self-check for the weather cache/stale logic |
+| `server/check_trains.rb` | Self-check for the walking-time filter |
 | `.env.example` | Settings template: TfNSW key, train stops, BOM locations. Copy to `.env` (git-ignored) |
 | `device/dash/run.sh` | Kindle loop → `/mnt/us/dash/run.sh` |
 | `device/dash/config.example` | Server address for the Kindle. Copy to `/mnt/us/dash/config` |
@@ -49,7 +50,8 @@ cp .env.example .env        # then fill in your key and locations
 cd server
 docker compose up -d --build                     # build and (re)start
 docker compose logs -f                           # errors show as "weather: …", "trains: …"
-docker exec -i server-dash-1 ruby < check_weather.rb   # self-check
+docker exec -i server-dash-1 ruby < check_weather.rb   # self-checks
+docker exec -i server-dash-1 ruby < check_trains.rb
 ```
 
 Preview in a browser at `http://localhost:8090/` (HTML) or `http://localhost:8090/dash.png` (the image the Kindle sees).
@@ -61,6 +63,7 @@ Preview in a browser at `http://localhost:8090/` (HTML) or `http://localhost:809
   - You board at the first stop. Only trains that run through to the last stop with no change are shown.
   - Each later stop gets an arrival-time column. Two or three stops fit on screen.
   - Stop IDs come from the Trip Planner API's `stop_finder`.
+- **`WALK_MIN`:** minutes to walk to the first stop (default 3). Trains leaving sooner are hidden.
 - **`BOM_FORECAST_FILE` / `BOM_FORECAST_AREA`:** the state's town-forecast file and a town in it,
   e.g. `IDN11060` (NSW) and `Sydney`.
 - **`BOM_OBS_FILE` / `BOM_STATION`:** the state's latest-readings file and a weather station in it,
@@ -108,7 +111,7 @@ screen size (`W, H` in `app.rb`), touchscreen device and tap coordinates (`run.s
 |---|---|
 | Start the dashboard | Tap **Dashboard** in the library, or let `emergency.sh` start it ~30 s after boot |
 | Refresh now | Tap anywhere ("Refreshing..." appears) |
-| Go back to the normal Kindle | Tap the **clock** (top-left). The Kindle UI takes ~20–30 s to start; this is not a reboot |
+| Go back to the normal Kindle | Tap the **clock** (top-left), then the **EXIT** button that appears mid-screen within 5 s. Any other tap, or waiting, returns to the dashboard. The Kindle UI takes ~20–30 s to start; this is not a reboot |
 | Turn off auto-start | Delete `emergency.sh` from the Kindle's main folder (over USB) |
 | Recover if it's stuck | Hold power ~20 s to reboot |
 
@@ -137,7 +140,7 @@ ssh kindle 'for d in /proc/[0-9]*; do case "$(tr "\0" " " < $d/cmdline 2>/dev/nu
             (setsid /mnt/us/dash/run.sh >/tmp/dash.log 2>&1 &)'
 ```
 
-Log: `/tmp/dash.log` on the Kindle. It records each tap's x/y and any failed downloads.
+Log: `/tmp/dash.log` on the Kindle. It records each tap's x/y, each EXIT confirmation, and any failed downloads.
 
 ### How auto-start works
 
@@ -151,7 +154,9 @@ No Kindle system files are changed.
 - busybox `kill -0 ""` returns success. Always check that a PID is non-empty first.
 - busybox `timeout` syntax is `timeout -t SECS`.
 - busybox `ps` truncates command names. Use `/proc/*/cmdline`.
-- Touchscreen: `/dev/input/event1`. Its coordinates are screen pixels.
+- Touchscreen: `/dev/input/event1`. Its coordinates are screen pixels. A finger lifting sends its own frame
+  (tracking ID −1); `run.sh` ignores those so a lift doesn't count as a second tap.
+- `fbink -c -h` clears the screen to **black**. Clear with a separate `fbink -c` first.
 - The Kindle's clock shows the wrong timezone label, but UTC is correct. The time on screen comes from the server anyway.
 - USB through some hubs drops every few seconds. Plug the Kindle straight into the computer.
 
