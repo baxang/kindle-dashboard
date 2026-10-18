@@ -86,13 +86,13 @@
                     d.empty? ? "" : %(<div class="more">#{mins.(d[-1]) < 60 ? "then in #{d.map(&mins).join(", ")} min" : "then #{d.map(&hm).join(", ")}"}</div>) }
      note = ->(r) { r[:notes].empty? ? "" : %(<div class="note">⚠ #{ERB::Util.h(r[:notes].join("; "))}</div>) } %>
 
-  <h2><%= TRAIN_STOPS[0][1] %> → <%= TRAIN_STOPS[-1][1] %></h2>
+  <h2><%= JOURNEY1_STOPS[0][1] %> → <%= JOURNEY1_STOPS[-1][1] %></h2>
   <% if trains.nil? %><div class="row">Trains unavailable</div>
   <% else %><%= note.(trains) %>
     <% if trains[:list].empty? %><div class="row">No trains soon</div>
     <% else %>
       <table class="trains">
-        <tr><% TRAIN_STOPS.each do |_, label| %><th><%= label %></th><% end %></tr>
+        <tr><% JOURNEY1_STOPS.each do |_, label| %><th><%= label %></th><% end %></tr>
         <% trains[:list].first(3).each do |t| %>
           <tr><td><b><%= hm.(t[:dep]) %></b> <small class="in"><%= inm.(t[:dep]) %></small></td><% t[:arrivals].each do |a| %><td><%= hm.(a) %></td><% end %></tr>
         <% end %>
@@ -100,14 +100,14 @@
     <% end %>
   <% end %>
 
-  <% if TRANSFER_STOPS %>
-    <h2><%= TRANSFER_STOPS[0][1] %> → <%= TRANSFER_STOPS[-1][1] %> <span class="via">via <%= TRANSFER_STOPS[1][1] %></span></h2>
+  <% if JOURNEY2_STOPS %>
+    <h2><%= JOURNEY2_STOPS[0][1] %> → <%= JOURNEY2_STOPS[-1][1] %> <span class="via">via <%= JOURNEY2_STOPS[1][1] %></span></h2>
     <% if transfers.nil? %><div class="row">Trips unavailable</div>
     <% else %><%= note.(transfers) %>
       <% if transfers[:list].empty? %><div class="row">No trips soon</div>
       <% else %>
         <table class="trains">
-          <tr><th><%= TRANSFER_STOPS[0][1] %></th><th>Change</th><th><%= TRANSFER_STOPS[-1][1] %></th></tr>
+          <tr><th><%= JOURNEY2_STOPS[0][1] %></th><th>Change</th><th><%= JOURNEY2_STOPS[-1][1] %></th></tr>
           <% transfers[:list].first(3).each do |t| %>
             <tr><td><b><%= hm.(t[:dep]) %></b> <small class="in"><%= inm.(t[:dep]) %> <%= t[:line] %></small></td><td><%= hm.(t[:change]) %></td><td><% if t[:bus] %><small class="in">bus</small> <% end %><%= hm.(t[:arr]) %></td></tr>
           <% end %>

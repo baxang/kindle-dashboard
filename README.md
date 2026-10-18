@@ -12,8 +12,8 @@ The screen shows:
 
 <img src="docs/screenshot.png" width="380" alt="Dashboard: clock, Parramatta weather and 5-day forecast, trains from Strathfield to Town Hall, and Liverpool to Chatswood changing at Central, each with a trackwork line saying buses replace trains between Cabramatta and Parramatta">
 
-The screenshot uses `TRAIN_STOPS=213510:Strathfield,200060:Central,200070:Town Hall`,
-`TRANSFER_STOPS=217020:Liverpool,200060:Central,206710:Chatswood` and Parramatta weather, on a trackwork Sunday.
+The screenshot uses `JOURNEY1_STOPS=213510:Strathfield,200060:Central,200070:Town Hall`,
+`JOURNEY2_STOPS=217020:Liverpool,200060:Central,206710:Chatswood` and Parramatta weather, on a trackwork Sunday.
 
 ## How it fits together
 
@@ -62,15 +62,15 @@ Preview in a browser at `http://localhost:8090/` (HTML) or `http://localhost:809
 ### Settings (`.env`)
 
 - **`NSW_TRANSPORT_OPENDATA_API`:** free key from opendata.transport.nsw.gov.au.
-- **`TRAIN_STOPS`:** `stopID:Label,...` in travel order, e.g. `213510:Strathfield,200060:Central,200070:Town Hall`.
+- **`JOURNEY1_STOPS`:** `stopID:Label,...` in travel order, e.g. `213510:Strathfield,200060:Central,200070:Town Hall`.
   - You board at the first stop. Only trains that run through to the last stop with no change are shown.
   - Each later stop gets an arrival-time column. Two or three stops fit on screen.
   - Stop IDs come from the Trip Planner API's `stop_finder`.
-- **`WALK_MIN`:** minutes to walk to the first stop (default 3). Trains leaving sooner are hidden.
-- **`TRANSFER_STOPS`** (optional): a second journey with one change, `from,change,to` in the same format,
+- **`JOURNEY1_WALK_MIN`:** minutes to walk to the first stop (default 3). Trains leaving sooner are hidden.
+- **`JOURNEY2_STOPS`** (optional): a second journey with one change, `from,change,to` in the same format,
   e.g. `200060:Central,213510:Strathfield,215020:Parramatta`. Each row shows the line you board (T1, T9, …),
   when the onward service leaves the change stop, and when you arrive. Replacement buses are allowed and marked "bus".
-- **`TRANSFER_WALK_MIN`:** like `WALK_MIN`, for the second journey's first stop.
+- **`JOURNEY2_WALK_MIN`:** like `JOURNEY1_WALK_MIN`, for the second journey's first stop.
 - **`BOM_FORECAST_FILE` / `BOM_FORECAST_AREA`:** the state's town-forecast file and a town in it,
   e.g. `IDN11060` (NSW) and `Sydney`.
 - **`BOM_OBS_FILE` / `BOM_STATION`:** the state's latest-readings file and a weather station in it,

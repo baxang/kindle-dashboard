@@ -17,11 +17,11 @@ BOM_FORECAST_FILE, BOM_FORECAST_AREA = ENV.fetch("BOM_FORECAST_FILE"), ENV.fetch
 BOM_OBS_FILE, BOM_STATION = ENV.fetch("BOM_OBS_FILE"), ENV.fetch("BOM_STATION")
 # "id:Label,id:Label,...": the first stop is where you board, the last is the query destination,
 # and every stop after the first gets an arrival-time column.
-TRAIN_STOPS = ENV.fetch("TRAIN_STOPS").split(",").map { |s| s.strip.split(":", 2) }
-WALK_MIN = Integer(ENV.fetch("WALK_MIN", 3)) # minutes to walk to the first stop; trains sooner than this can't be caught
+JOURNEY1_STOPS = ENV.fetch("JOURNEY1_STOPS").split(",").map { |s| s.strip.split(":", 2) }
+JOURNEY1_WALK_MIN = Integer(ENV.fetch("JOURNEY1_WALK_MIN", 3)) # minutes to walk to the first stop; trains sooner than this can't be caught
 # Optional second trip, "from,change,to" in the same format. Any mode is allowed, so trackwork buses show up.
-TRANSFER_STOPS = ENV["TRANSFER_STOPS"]&.split(",")&.map { |s| s.strip.split(":", 2) }
-TRANSFER_WALK_MIN = Integer(ENV.fetch("TRANSFER_WALK_MIN", 3))
+JOURNEY2_STOPS = ENV["JOURNEY2_STOPS"]&.split(",")&.map { |s| s.strip.split(":", 2) }
+JOURNEY2_WALK_MIN = Integer(ENV.fetch("JOURNEY2_WALK_MIN", 3))
 
 # Refetched every 10 min. If a fetch fails, the last good result is shown for up to a day,
 # marked stale after 30 min so the screen says "as of HH:MM".
@@ -101,12 +101,12 @@ end
 
 # Next trains from the first stop that run through to the last one, with arrival times at the other stops.
 def trains
-  journeys = trips(TRAIN_STOPS[0][0], TRAIN_STOPS[-1][0])
+  journeys = trips(JOURNEY1_STOPS[0][0], JOURNEY1_STOPS[-1][0])
   list = journeys.filter_map do |j|
     leg = j["legs"][0]
     next unless j["legs"].size == 1 && leg.dig("transportation", "product", "class") == 1 # one train, no change
     arrive = ->(id) { s = leg["stopSequence"].to_a.find { |s| s.dig("parent", "id") == id }; s && at(s, "arrival") }
-    { dep: at(leg["origin"], "departure"), arrivals: TRAIN_STOPS.drop(1).map { |id, _| arrive.(id) } }
+    { dep: at(leg["origin"], "departure"), arrivals: JOURNEY1_STOPS.drop(1).map { |id, _| arrive.(id) } }
   end
   { list: list.uniq { |t| t[:dep] }.sort_by { |t| t[:dep] }, notes: notices(journeys) }
 rescue => e
@@ -116,7 +116,7 @@ end
 
 # Next trips on the second journey: when the first train leaves, when the onward service leaves the change stop, and arrival.
 def transfers
-  from, via, to = TRANSFER_STOPS.map(&:first)
+  from, via, to = JOURNEY2_STOPS.map(&:first)
   journeys = trips(from, to, type_via: "any", name_via: via)
   list = journeys.map do |j|
     legs = j["legs"].reject { |l| l.dig("transportation", "product", "class").to_i >= 99 } # walks between platforms
@@ -132,9 +132,9 @@ rescue => e
 end
 
 def html(now = Time.now)
-  direct, change = [Thread.new { trains }, Thread.new { transfers if TRANSFER_STOPS }].map(&:value) # in parallel: each query takes 1-3 s
+  direct, change = [Thread.new { trains }, Thread.new { transfers if JOURNEY2_STOPS }].map(&:value) # in parallel: each query takes 1-3 s
   catchable = ->(r, walk) { r&.merge(list: r[:list].reject { |t| t[:dep] - now < walk * 60 }.first(6)) }
-  TEMPLATE.result_with_hash(now:, weather:, trains: catchable.(direct, WALK_MIN), transfers: catchable.(change, TRANSFER_WALK_MIN))
+  TEMPLATE.result_with_hash(now:, weather:, trains: catchable.(direct, JOURNEY1_WALK_MIN), transfers: catchable.(change, JOURNEY2_WALK_MIN))
 end
 
 def render_png
