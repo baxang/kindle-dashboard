@@ -6,11 +6,14 @@ image, and the Kindle downloads and shows it at the start of every minute.
 The screen shows:
 - time and date;
 - current weather and a 5-day forecast from the Bureau of Meteorology (BOM);
-- the next 5 trains you can still walk to on a Sydney Trains route, with arrival times at up to two later stops (Transport for NSW).
+- the next 6 trains you can still walk to on a Sydney Trains route, with arrival times at up to two later stops (Transport for NSW);
+- optionally, a second journey with a change, e.g. Central → Strathfield → Parramatta;
+- trackwork: replacement buses and dated line alerts, as one ⚠ line per journey.
 
-<img src="docs/screenshot.png" width="380" alt="Dashboard: clock, current weather, 5-day forecast with icons, and the next three trains from West Ryde with Central and Town Hall arrival times">
+<img src="docs/screenshot.png" width="380" alt="Dashboard: clock, Parramatta weather and 5-day forecast, trains from Strathfield to Town Hall, and Liverpool to Chatswood changing at Central, each with a trackwork line saying buses replace trains between Cabramatta and Parramatta">
 
-The screenshot uses `TRAIN_STOPS=211420:West Ryde,200060:Central,200070:Town Hall` and Sydney Olympic Park weather.
+The screenshot uses `TRAIN_STOPS=213510:Strathfield,200060:Central,200070:Town Hall`,
+`TRANSFER_STOPS=217020:Liverpool,200060:Central,206710:Chatswood` and Parramatta weather, on a trackwork Sunday.
 
 ## How it fits together
 
@@ -64,6 +67,10 @@ Preview in a browser at `http://localhost:8090/` (HTML) or `http://localhost:809
   - Each later stop gets an arrival-time column. Two or three stops fit on screen.
   - Stop IDs come from the Trip Planner API's `stop_finder`.
 - **`WALK_MIN`:** minutes to walk to the first stop (default 3). Trains leaving sooner are hidden.
+- **`TRANSFER_STOPS`** (optional): a second journey with one change, `from,change,to` in the same format,
+  e.g. `200060:Central,213510:Strathfield,215020:Parramatta`. Each row shows the line you board (T1, T9, …),
+  when the onward service leaves the change stop, and when you arrive. Replacement buses are allowed and marked "bus".
+- **`TRANSFER_WALK_MIN`:** like `WALK_MIN`, for the second journey's first stop.
 - **`BOM_FORECAST_FILE` / `BOM_FORECAST_AREA`:** the state's town-forecast file and a town in it,
   e.g. `IDN11060` (NSW) and `Sydney`.
 - **`BOM_OBS_FILE` / `BOM_STATION`:** the state's latest-readings file and a weather station in it,
@@ -77,6 +84,10 @@ The names must match the `description` attribute in BOM's XML exactly. Browse th
 - **Trains:** one Trip Planner query from the first to the last stop. Arrival times at the other stops come
   from the train's stop list. Real-time estimates are used when available. API times are UTC; the code
   converts them to local time (`TZ` in `compose.yml`).
+- **Second journey:** one more query with the change stop as `via`, run at the same time as the first.
+  The ⚠ line comes from the same queries: legs marked "Temporary buses", and line alerts that are in effect now and
+  have an end date (trackwork). Open-ended ones ("Bus changes from 21 June") and per-trip ones ("Running late") are left out.
+  End dates come from the alerts feed (`add_info`, ~3 MB), fetched every 10 min.
 - **Weather:** BOM's anonymous FTP, which is BOM's channel for automated downloads.
   - The forecast gives the wording ("Possible shower"), min/max and rain chance, and is updated a few times
     a day. Late in the evening BOM drops today's min/max, so the screen leaves them out.

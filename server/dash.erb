@@ -5,28 +5,28 @@
 <style>
   /* e-ink: black on white, big type, thick rules, no greys or gradients */
   html, body { margin: 0; width: 758px; height: 1024px; overflow: hidden; background: #fff; color: #000; }
-  body { font-family: "DejaVu Sans", sans-serif; padding: 36px; box-sizing: border-box; }
+  body { font-family: "DejaVu Sans", sans-serif; padding: 24px 36px 36px; box-sizing: border-box; }
   .top { display: flex; justify-content: space-between; align-items: flex-start; }
   .time { font-size: 104px; font-weight: bold; line-height: 1; }
   .wx { text-align: right; font-size: 30px; }
   .wxtext { max-width: 300px; margin-left: auto; }
   .date { font-size: 36px; margin-top: 8px; }
-  h2 { font-size: 30px; margin: 26px 0 8px; padding-bottom: 6px; border-bottom: 4px solid #000; }
+  h2 { font-size: 28px; margin: 10px 0 4px; padding-bottom: 4px; border-bottom: 4px solid #000; }
   .big { font-size: 64px; font-weight: bold; }
   .row { display: flex; justify-content: space-between; font-size: 32px; padding: 6px 0; }
   .asof { font-size: 22px; font-weight: normal; }
-  .trains { width: 100%; border-collapse: collapse; font-size: 46px; }
-  .trains th { font-size: 22px; text-align: left; padding: 0 0 4px; vertical-align: bottom; }
-  .trains td { padding: 7px 0; border-bottom: 1px solid #000; white-space: nowrap; }
+  .trains { width: 100%; border-collapse: collapse; font-size: 38px; }
+  .trains th { font-size: 20px; text-align: left; padding: 0 0 4px; vertical-align: bottom; }
+  .trains td { padding: 2px 0; border-bottom: 1px solid #000; white-space: nowrap; }
   .trains th:not(:first-child), .trains td:not(:first-child) { text-align: right; }
   .trains .in { font-size: 24px; }
   .trains td + td { padding-left: 18px; }
-  .trains tr.next td { padding-top: 10px; padding-bottom: 10px; }
-  .trains tr.next td:first-child { font-size: 66px; }
-  .trains tr.next .in { font-size: 28px; }
+  .via { font-weight: normal; }
+  .more { font-size: 24px; padding-top: 4px; }
+  .note { font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* trackwork, one line */
   .feels { font-size: 30px; font-weight: normal; } /* sits inside .big */
-  .fc { margin-top: 28px; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; text-align: center; font-size: 26px; line-height: 1.25; }
-  .fc svg { width: 96px; height: 96px; margin: 2px 0; }
+  .fc { margin-top: 16px; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; text-align: center; font-size: 26px; line-height: 1.15; }
+  .fc svg { width: 80px; height: 80px; margin: 2px 0; }
   .fc .hi { font-size: 38px; font-weight: bold; }
 </style>
 </head>
@@ -78,16 +78,42 @@
     </div>
   <% end %>
 
+  <%# Three rows per journey, then the rest on one line: "then in 20, 35 min", or clock times once any is an hour or more away. %>
+  <% hm = ->(t) { t ? t.strftime("%H:%M") : "—" }
+     mins = ->(t) { ((t - now) / 60).floor }
+     inm = ->(t) { (m = mins.(t)) < 1 ? "now" : m < 60 ? "#{m} min" : "#{m / 60} h #{m % 60} min" }
+     more = ->(r) { d = r[:list].drop(3).map { |t| t[:dep] }
+                    d.empty? ? "" : %(<div class="more">#{mins.(d[-1]) < 60 ? "then in #{d.map(&mins).join(", ")} min" : "then #{d.map(&hm).join(", ")}"}</div>) }
+     note = ->(r) { r[:notes].empty? ? "" : %(<div class="note">⚠ #{ERB::Util.h(r[:notes].join("; "))}</div>) } %>
+
   <h2><%= TRAIN_STOPS[0][1] %> → <%= TRAIN_STOPS[-1][1] %></h2>
   <% if trains.nil? %><div class="row">Trains unavailable</div>
-  <% elsif trains.empty? %><div class="row">No trains soon</div>
-  <% else hm = ->(t) { t ? t.strftime("%H:%M") : "—" } %>
-    <table class="trains">
-      <tr><% TRAIN_STOPS.each do |_, label| %><th><%= label %></th><% end %></tr>
-      <% trains.each_with_index do |t, i| %>
-        <tr class="<%= "next" if i.zero? %>"><td><b><%= hm.(t[:dep]) %></b> <small class="in"><%= (m = ((t[:dep] - now) / 60).floor) < 1 ? "now" : "#{m} min" %></small></td><% t[:arrivals].each do |a| %><td><%= hm.(a) %></td><% end %></tr>
+  <% else %><%= note.(trains) %>
+    <% if trains[:list].empty? %><div class="row">No trains soon</div>
+    <% else %>
+      <table class="trains">
+        <tr><% TRAIN_STOPS.each do |_, label| %><th><%= label %></th><% end %></tr>
+        <% trains[:list].first(3).each do |t| %>
+          <tr><td><b><%= hm.(t[:dep]) %></b> <small class="in"><%= inm.(t[:dep]) %></small></td><% t[:arrivals].each do |a| %><td><%= hm.(a) %></td><% end %></tr>
+        <% end %>
+      </table><%= more.(trains) %>
+    <% end %>
+  <% end %>
+
+  <% if TRANSFER_STOPS %>
+    <h2><%= TRANSFER_STOPS[0][1] %> → <%= TRANSFER_STOPS[-1][1] %> <span class="via">via <%= TRANSFER_STOPS[1][1] %></span></h2>
+    <% if transfers.nil? %><div class="row">Trips unavailable</div>
+    <% else %><%= note.(transfers) %>
+      <% if transfers[:list].empty? %><div class="row">No trips soon</div>
+      <% else %>
+        <table class="trains">
+          <tr><th><%= TRANSFER_STOPS[0][1] %></th><th>Change</th><th><%= TRANSFER_STOPS[-1][1] %></th></tr>
+          <% transfers[:list].first(3).each do |t| %>
+            <tr><td><b><%= hm.(t[:dep]) %></b> <small class="in"><%= inm.(t[:dep]) %> <%= t[:line] %></small></td><td><%= hm.(t[:change]) %></td><td><% if t[:bus] %><small class="in">bus</small> <% end %><%= hm.(t[:arr]) %></td></tr>
+          <% end %>
+        </table><%= more.(transfers) %>
       <% end %>
-    </table>
+    <% end %>
   <% end %>
 </body>
 </html>

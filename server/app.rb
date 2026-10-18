@@ -19,6 +19,9 @@ BOM_OBS_FILE, BOM_STATION = ENV.fetch("BOM_OBS_FILE"), ENV.fetch("BOM_STATION")
 # and every stop after the first gets an arrival-time column.
 TRAIN_STOPS = ENV.fetch("TRAIN_STOPS").split(",").map { |s| s.strip.split(":", 2) }
 WALK_MIN = Integer(ENV.fetch("WALK_MIN", 3)) # minutes to walk to the first stop; trains sooner than this can't be caught
+# Optional second trip, "from,change,to" in the same format. Any mode is allowed, so trackwork buses show up.
+TRANSFER_STOPS = ENV["TRANSFER_STOPS"]&.split(",")&.map { |s| s.strip.split(":", 2) }
+TRANSFER_WALK_MIN = Integer(ENV.fetch("TRANSFER_WALK_MIN", 3))
 
 # Refetched every 10 min. If a fetch fails, the last good result is shown for up to a day,
 # marked stale after 30 min so the screen says "as of HH:MM".
@@ -65,24 +68,73 @@ end
 
 def at(point, kind) = Time.parse(point["#{kind}TimeEstimated"] || point["#{kind}TimePlanned"]).localtime
 
+def trips(from, to, **via) = tfnsw("trip", depArrMacro: "dep", type_origin: "any", name_origin: from, type_destination: "any",
+                                   name_destination: to, calcNumberOfTrips: 8, TfNSWTR: true, **via)["journeys"] # 10 is ~2x slower; 8 leaves spares after the walk filter
+
+def station(point) = point["name"].split(",").first.delete_suffix(" Station")
+
+# Ids of alerts in effect now with a fixed end, i.e. trackwork ("Sunday 18 October: buses replace trains ...").
+# Open-ended ones are news or noise ("Bus changes from 21 June"). The trip API omits dates, so they come from
+# the alerts feed (~3 MB), refetched every 10 min; on failure the last list is kept.
+def trackwork_ids
+  if !@trackwork || Time.now - @trackwork[:at] > 600
+    infos = tfnsw("add_info", filterPublicationStatus: "current").dig("infos", "current") or raise "no infos"
+    now = Time.now
+    ids = infos.select { |i| i.dig("timestamps", "validity").to_a.any? { |v| !v["isOpenEnd"] && Time.parse(v["from"]) <= now && now < Time.parse(v["to"]) } }
+    @trackwork = { at: now, ids: ids.map { |i| i["id"] }.to_set } # ponytail: both trip threads may refetch at once; harmless
+  end
+  @trackwork[:ids]
+rescue => e
+  warn "alerts: #{e.class}: #{e.message}"
+  @trackwork ? @trackwork[:ids] : Set.new
+end
+
+# Trackwork from every journey the query returned: replacement buses, and line alerts that are trackwork_ids.
+# Per-trip messages ("Running late") are left out; estimates already cover them.
+def notices(journeys)
+  legs = journeys.flat_map { |j| j["legs"] }
+  buses = legs.select { |l| l.dig("transportation", "product", "name").to_s =~ /temporary|replacement/i }
+              .map { |l| "Buses replace trains #{station(l["origin"])}–#{station(l["destination"])}" }
+  alerts = legs.flat_map { |l| l["infos"].to_a }.select { |i| i["type"] == "lineInfo" && trackwork_ids.include?(i["id"]) }
+  (buses + alerts.map { |i| i.dig("properties", "smsText") }).compact.uniq
+end
+
 # Next trains from the first stop that run through to the last one, with arrival times at the other stops.
 def trains
-  journeys = tfnsw("trip", depArrMacro: "dep", type_origin: "any", name_origin: TRAIN_STOPS[0][0], type_destination: "any",
-                           name_destination: TRAIN_STOPS[-1][0], calcNumberOfTrips: 8, TfNSWTR: true)["journeys"] # 10 is ~2x slower; 8 leaves spares after the walk filter
-  journeys.filter_map do |j|
+  journeys = trips(TRAIN_STOPS[0][0], TRAIN_STOPS[-1][0])
+  list = journeys.filter_map do |j|
     leg = j["legs"][0]
     next unless j["legs"].size == 1 && leg.dig("transportation", "product", "class") == 1 # one train, no change
     arrive = ->(id) { s = leg["stopSequence"].to_a.find { |s| s.dig("parent", "id") == id }; s && at(s, "arrival") }
     { dep: at(leg["origin"], "departure"), arrivals: TRAIN_STOPS.drop(1).map { |id, _| arrive.(id) } }
-  end.uniq { |t| t[:dep] }.sort_by { |t| t[:dep] }
+  end
+  { list: list.uniq { |t| t[:dep] }.sort_by { |t| t[:dep] }, notes: notices(journeys) }
 rescue => e
   warn "trains: #{e.class}: #{e.message}"
   nil
 end
 
+# Next trips on the second journey: when the first train leaves, when the onward service leaves the change stop, and arrival.
+def transfers
+  from, via, to = TRANSFER_STOPS.map(&:first)
+  journeys = trips(from, to, type_via: "any", name_via: via)
+  list = journeys.map do |j|
+    legs = j["legs"].reject { |l| l.dig("transportation", "product", "class").to_i >= 99 } # walks between platforms
+    onward = legs.find { |l| l.dig("origin", "parent", "id") == via } || legs[1] # planner may change elsewhere; nil if one train runs through
+    { dep: at(legs[0]["origin"], "departure"), line: legs[0].dig("transportation", "disassembledName"),
+      change: onward && at(onward["origin"], "departure"), arr: at(legs[-1]["destination"], "arrival"),
+      bus: legs.any? { |l| l.dig("transportation", "product", "class") == 5 } } # 5 = bus; Metro (2) or ferry is not a bus
+  end
+  { list: list.uniq { |t| t[:dep] }.sort_by { |t| t[:dep] }, notes: notices(journeys) }
+rescue => e
+  warn "transfers: #{e.class}: #{e.message}"
+  nil
+end
+
 def html(now = Time.now)
-  reachable = trains&.reject { |t| t[:dep] - now < WALK_MIN * 60 }
-  TEMPLATE.result_with_hash(now:, weather:, trains: reachable&.first(5))
+  direct, change = [Thread.new { trains }, Thread.new { transfers if TRANSFER_STOPS }].map(&:value) # in parallel: each query takes 1-3 s
+  catchable = ->(r, walk) { r&.merge(list: r[:list].reject { |t| t[:dep] - now < walk * 60 }.first(6)) }
+  TEMPLATE.result_with_hash(now:, weather:, trains: catchable.(direct, WALK_MIN), transfers: catchable.(change, TRANSFER_WALK_MIN))
 end
 
 def render_png
