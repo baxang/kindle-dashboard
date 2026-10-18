@@ -35,7 +35,7 @@ puts "OK #{want}"
 # Alerts: only ones in effect now with a fixed end count as trackwork; open-ended news and next week's work don't.
 alert = ->(id, from, to, open = false) { { "id" => id, "timestamps" => { "validity" => [{ "from" => from.utc.iso8601, "to" => to.utc.iso8601, "isOpenEnd" => open }] } } }
 feed = { "infos" => { "current" => [alert.("work", now - 3600, now + 3600), alert.("news", now - 3600, Time.utc(2500), true), alert.("next", now + 86_400, now + 90_000)] } }
-define_method(:tfnsw) { |*, **| feed }
+define_method(:tfnsw) { |*, filterMOTType: nil, **| filterMOTType == 2 ? { "infos" => {} } : feed } # Metro: no alerts today
 @trackwork = nil
 raise "trackwork_ids: got #{trackwork_ids.to_a}" unless trackwork_ids == Set["work"]
 puts "OK trackwork alerts"

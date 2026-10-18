@@ -87,7 +87,7 @@ The names must match the `description` attribute in BOM's XML exactly. Browse th
 - **Second journey:** one more query with the change stop as `via`, run at the same time as the first.
   The ⚠ line comes from the same queries: legs marked "Temporary buses", and line alerts that are in effect now and
   have an end date (trackwork). Open-ended ones ("Bus changes from 21 June") and per-trip ones ("Running late") are left out.
-  End dates come from the alerts feed (`add_info`, ~3 MB), fetched every 10 min.
+  End dates come from the alerts feed (`add_info`, train and Metro line alerts, ~50 KB gzipped), fetched every 10 min.
 - **Weather:** BOM's anonymous FTP, which is BOM's channel for automated downloads.
   - The forecast gives the wording ("Possible shower"), min/max and rain chance, and is updated a few times
     a day. Late in the evening BOM drops today's min/max, so the screen leaves them out.

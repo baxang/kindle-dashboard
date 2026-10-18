@@ -35,9 +35,17 @@ def weather
 end
 
 # BOM's anonymous FTP is its documented channel for automated downloads. One login fetches all files.
+# A file is downloaded only when its modification time has changed: the forecast is reissued a few times a day,
+# the readings about every 10 min.
 def bom_get(*files)
+  @bom ||= {}
   Net::FTP.open("ftp.bom.gov.au", username: "anonymous", open_timeout: 5, read_timeout: 15) do |ftp|
-    files.map { |f| REXML::Document.new(ftp.getbinaryfile("/anon/gen/fwo/#{f}.xml", nil)) }
+    files.map do |f|
+      path = "/anon/gen/fwo/#{f}.xml"
+      mtime = ftp.mtime(path)
+      @bom[f] = { mtime:, doc: REXML::Document.new(ftp.getbinaryfile(path, nil)) } unless @bom.dig(f, :mtime) == mtime
+      @bom[f][:doc]
+    end
   end
 end
 
@@ -75,10 +83,13 @@ def station(point) = point["name"].split(",").first.delete_suffix(" Station")
 
 # Ids of alerts in effect now with a fixed end, i.e. trackwork ("Sunday 18 October: buses replace trains ...").
 # Open-ended ones are news or noise ("Bus changes from 21 June"). The trip API omits dates, so they come from
-# the alerts feed (~3 MB), refetched every 10 min; on failure the last list is kept.
+# the alerts feed, refetched every 10 min; on failure the last list is kept. Only line alerts for trains (1) and
+# Metro (2), one mode per request: a fraction of the all-modes feed. Bus, coach and ferry alerts are left out.
 def trackwork_ids
   if !@trackwork || Time.now - @trackwork[:at] > 600
-    infos = tfnsw("add_info", filterPublicationStatus: "current").dig("infos", "current") or raise "no infos"
+    infos = [1, 2].flat_map do |mode| # a mode with no alerts comes back as "infos": {}
+      tfnsw("add_info", filterPublicationStatus: "current", filterInfoType: "lineInfo", filterMOTType: mode).fetch("infos").fetch("current", [])
+    end
     now = Time.now
     ids = infos.select { |i| i.dig("timestamps", "validity").to_a.any? { |v| !v["isOpenEnd"] && Time.parse(v["from"]) <= now && now < Time.parse(v["to"]) } }
     @trackwork = { at: now, ids: ids.map { |i| i["id"] }.to_set } # ponytail: both trip threads may refetch at once; harmless
