@@ -1,3 +1,4 @@
 .env
 backup/
 device/dash/config
+server/data/

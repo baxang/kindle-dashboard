@@ -9,6 +9,7 @@ The screen shows:
 - the next 6 trains you can still walk to on a Sydney Trains route, with arrival times at up to two later stops (Transport for NSW);
 - optionally, a second journey with a change, e.g. Central → Strathfield → Parramatta;
 - trackwork: replacement buses and dated line alerts, as one ⚠ line per journey.
+- a small battery icon at the bottom when the Kindle battery is at or below 20% and not charging (`LOW_BATT` in `.env`). Every fetch also appends `time,percent,charging` to `server/data/battery.csv`, to track battery drain.
 
 <img src="docs/screenshot.png" width="380" alt="Dashboard: clock, Parramatta weather and 5-day forecast, trains from Strathfield to Town Hall, and Liverpool to Chatswood changing at Central, each with a trackwork line saying buses replace trains between Cabramatta and Parramatta">
 

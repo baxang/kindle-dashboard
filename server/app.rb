@@ -22,6 +22,8 @@ JOURNEY1_WALK_MIN = Integer(ENV.fetch("JOURNEY1_WALK_MIN", 3)) # minutes to walk
 # Optional second trip, "from,change,to" in the same format. Any mode is allowed, so trackwork buses show up.
 JOURNEY2_STOPS = ENV["JOURNEY2_STOPS"]&.split(",")&.map { |s| s.strip.split(":", 2) }
 JOURNEY2_WALK_MIN = Integer(ENV.fetch("JOURNEY2_WALK_MIN", 3))
+LOW_BATT = Integer(ENV.fetch("LOW_BATT", 20)) # at or below this %, and not charging, the dashboard shows a battery icon
+BATT_LOG = "/data/battery.csv" # one line per Kindle fetch: time,percent,charging
 
 # Refetched every 10 min. If a fetch fails, the last good result is shown for up to a day,
 # marked stale after 30 min so the screen says "as of HH:MM".
@@ -142,17 +144,17 @@ rescue => e
   nil
 end
 
-def html(now = Time.now)
+def html(now = Time.now, batt: nil)
   direct, change = [Thread.new { trains }, Thread.new { transfers if JOURNEY2_STOPS }].map(&:value) # in parallel: each query takes 1-3 s
   catchable = ->(r, walk) { r&.merge(list: r[:list].reject { |t| t[:dep] - now < walk * 60 }.first(6)) }
-  TEMPLATE.result_with_hash(now:, weather:, trains: catchable.(direct, JOURNEY1_WALK_MIN), transfers: catchable.(change, JOURNEY2_WALK_MIN))
+  TEMPLATE.result_with_hash(now:, batt:, weather:, trains: catchable.(direct, JOURNEY1_WALK_MIN), transfers: catchable.(change, JOURNEY2_WALK_MIN))
 end
 
-def render_png
+def render_png(query = "")
   browser = Ferrum::Browser.new(window_size: [W, H], process_timeout: 30, timeout: 30, # page load includes data fetches
                                 browser_options: { "no-sandbox" => nil, "disable-dev-shm-usage" => nil })
   browser.resize(width: W, height: H) # window_size includes browser chrome; this sets the viewport
-  browser.goto("http://127.0.0.1:#{PORT}/")
+  browser.goto("http://127.0.0.1:#{PORT}/?#{query}")
   img = MiniMagick::Image.read(browser.screenshot(encoding: :binary))
   # eips on old firmware wants plain 8-bit single-channel greyscale PNG
   img.combine_options do |c|
@@ -168,8 +170,22 @@ end
 
 if $0 == __FILE__ # the check_*.rb scripts require this file without starting the server
   server = WEBrick::HTTPServer.new(Port: PORT)
-  server.mount_proc("/") { |_, res| res.content_type = "text/html; charset=utf-8"; res.body = html }
-  server.mount_proc("/dash.png") { |_, res| res.content_type = "image/png"; res.body = render_png }
+  server.mount_proc("/") do |req, res|
+    batt = Integer(req.query["batt"], exception: false)
+    res.content_type = "text/html; charset=utf-8"
+    res.body = html(batt: (batt if batt && batt <= LOW_BATT && req.query["chg"] != "1"))
+  end
+  server.mount_proc("/dash.png") do |req, res|
+    if (batt = Integer(req.query["batt"], exception: false))
+      begin
+        File.write(BATT_LOG, "#{Time.now.iso8601},#{batt},#{req.query["chg"]}\n", mode: "a")
+      rescue => e
+        warn "battery log: #{e.message}"
+      end
+    end
+    res.content_type = "image/png"
+    res.body = render_png(req.query_string.to_s)
+  end
   %w[INT TERM].each { |s| trap(s) { server.shutdown } }
   server.start
 end

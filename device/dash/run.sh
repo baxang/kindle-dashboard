@@ -42,7 +42,9 @@ wait_tap() {
 
 n=0
 while true; do
-  if wget -q -O /tmp/dash.png "$URL"; then
+  # battery % and charging (1/0): the server logs them and shows a low-battery icon
+  q="?batt=$(lipc-get-prop com.lab126.powerd battLevel 2>/dev/null)&chg=$(lipc-get-prop com.lab126.powerd isCharging 2>/dev/null)"
+  if wget -q -O /tmp/dash.png "$URL$q"; then
     if [ $((n % FULL_EVERY)) -eq 0 ]; then eips -f -g /tmp/dash.png; else eips -g /tmp/dash.png; fi
     n=$((n + 1))
   else
