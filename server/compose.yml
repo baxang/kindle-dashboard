@@ -3,8 +3,10 @@ services:
     build: .
     ports: ["8090:8080"]
     env_file: ../.env # NSW_TRANSPORT_OPENDATA_API
+    user: "${DASH_UID:-1000}:${DASH_GID:-1000}" # not root; if `id -u`/`id -g` differ, set DASH_UID/DASH_GID so data/ stays yours
     environment:
       TZ: Australia/Sydney
+      HOME: /tmp # Chromium writes its profile under HOME
     volumes: ["./data:/data"] # battery.csv
     init: true # reaps the Chrome processes started on each render
     shm_size: 1gb

@@ -9,7 +9,7 @@ w = weather
 raise "should be stale" unless w[:stale]
 raise "today wrong" unless w[:min] == t.day && w[:text] == "Rain #{t.day}" # yesterday must not be shown as today
 raise "days wrong" unless w[:days].map { |d| d[:day] } == [t + 1, t + 2]
-labels = TEMPLATE.result_with_hash(now: Time.now, weather: w, trains: { list: [], notes: [] }, transfers: nil).scan(/as of [^<]*/)
+labels = TEMPLATE.result_with_hash(now: Time.now, batt: nil, weather: w, trains: { list: [], notes: [] }, transfers: nil).scan(/as of [^<]*/)
 raise "label missing" unless labels.size == 1
 @weather[:at] = Time.now - 90_000
 raise "should expire after a day" unless weather.nil?

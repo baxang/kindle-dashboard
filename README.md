@@ -53,6 +53,7 @@ All drawing happens on the server. The Kindle is too slow to render anything its
 cp .env.example .env        # then fill in your key and locations
 cd server
 docker compose up -d --build                     # build and (re)start
+# runs as uid:gid 1000:1000; if `id -u` / `id -g` print something else: DASH_UID=$(id -u) DASH_GID=$(id -g) docker compose up -d --build
 docker compose logs -f                           # errors show as "weather: …", "trains: …"
 docker exec -i server-dash-1 ruby < check_weather.rb   # self-checks
 docker exec -i server-dash-1 ruby < check_trains.rb

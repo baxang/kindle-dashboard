@@ -1,0 +1,3 @@
+# battery.csv lives here. The folder is in git so it belongs to you, not root, on a fresh clone.
+*
+!.gitignore
