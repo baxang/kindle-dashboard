@@ -22,8 +22,8 @@ JOURNEY1_WALK_MIN = Integer(ENV.fetch("JOURNEY1_WALK_MIN", 3)) # minutes to walk
 # Optional second trip, "from,change,to" in the same format. Any mode is allowed, so trackwork buses show up.
 JOURNEY2_STOPS = ENV["JOURNEY2_STOPS"]&.split(",")&.map { |s| s.strip.split(":", 2) }
 JOURNEY2_WALK_MIN = Integer(ENV.fetch("JOURNEY2_WALK_MIN", 3))
-LOW_BATT = Integer(ENV.fetch("LOW_BATT", 20)) # at or below this %, and not charging, the dashboard shows a battery icon
-BATT_LOG = "/data/battery.csv" # one line per Kindle fetch: time,percent,charging
+LOW_BATT = Integer(ENV.fetch("LOW_BATT", 20)) # at or below this %, and not charging, the dashboard shows a low-battery icon
+BATT_LOG = "/data/battery.csv" # one line per Kindle fetch: time,percent,charging,mAh left,average mA
 
 # Refetched every 10 min. If a fetch fails, the last good result is shown for up to a day,
 # marked stale after 30 min so the screen says "as of HH:MM".
@@ -173,12 +173,13 @@ if $0 == __FILE__ # the check_*.rb scripts require this file without starting th
   server.mount_proc("/") do |req, res|
     batt = Integer(req.query["batt"], exception: false)
     res.content_type = "text/html; charset=utf-8"
-    res.body = html(batt: (batt if batt && batt <= LOW_BATT && req.query["chg"] != "1"))
+    res.body = html(batt: (if req.query["chg"] == "1" then :charging elsif batt && batt <= LOW_BATT then :low end))
   end
   server.mount_proc("/dash.png") do |req, res|
     if (batt = Integer(req.query["batt"], exception: false))
       begin
-        File.write(BATT_LOG, "#{Time.now.iso8601},#{batt},#{req.query["chg"]}\n", mode: "a")
+        mah, ma = %w[mah ma].map { |k| Integer(req.query[k], exception: false) }
+        File.write(BATT_LOG, "#{Time.now.iso8601},#{batt},#{req.query["chg"]},#{mah},#{ma}\n", mode: "a")
       rescue => e
         warn "battery log: #{e.message}"
       end

@@ -10,7 +10,9 @@ CLOCK_X=400     # clock zone: taps left of this x...
 CLOCK_Y=200     # ...and above this y. Taps are logged to /tmp/dash.log if this needs tuning.
 BTN="100 660 420 670" # EXIT button tap area: x from, x to, y from, y to (drawn at x 123-634, y 448-640, plus a margin)
 CONFIRM_SECS=5  # how long the EXIT button waits for its tap
+FETCH_TIMEOUT=40 # give up on a download after this many seconds without data (a render takes ~1 s, the server allows 30)
 FBINK=/mnt/us/libkh/bin/fbink
+BATT=/sys/class/power_supply/max77696-battery # PW2 fuel gauge
 
 # KOReader normally runs the SSH server; keep it up while KOReader is closed.
 # Firewall holes are checked separately: KOReader can remove them while dropbear lives on.
@@ -42,9 +44,11 @@ wait_tap() {
 
 n=0
 while true; do
-  # battery % and charging (1/0): the server logs them and shows a low-battery icon
+  # battery % and charging (1/0): the server logs them and shows a low-battery icon.
+  # mAh left and average mA (negative = draining) are only logged, to measure drain.
   q="?batt=$(lipc-get-prop com.lab126.powerd battLevel 2>/dev/null)&chg=$(lipc-get-prop com.lab126.powerd isCharging 2>/dev/null)"
-  if wget -q -O /tmp/dash.png "$URL$q"; then
+  q="$q&mah=$(cat $BATT/charge_now 2>/dev/null)&ma=$(cat $BATT/current_avg 2>/dev/null)"
+  if wget -q -T $FETCH_TIMEOUT -O /tmp/dash.png "$URL$q"; then
     if [ $((n % FULL_EVERY)) -eq 0 ]; then eips -f -g /tmp/dash.png; else eips -g /tmp/dash.png; fi
     n=$((n + 1))
   else
