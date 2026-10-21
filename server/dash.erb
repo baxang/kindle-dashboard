@@ -29,17 +29,21 @@
   .fc { margin-top: 16px; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; text-align: center; font-size: 26px; line-height: 1.15; }
   .fc svg { width: 80px; height: 80px; margin: 2px 0; }
   .fc .hi { font-size: 38px; font-weight: bold; }
+  .asleep { font-size: 48px; font-weight: bold; line-height: 1.1; } /* in place of the clock, which would go stale */
 </style>
 </head>
 <body>
   <div class="top">
     <div>
-      <div class="time"><%= now.strftime("%H:%M") %></div>
-      <div class="date"><%= now.strftime("%a %-d %B") %></div>
+      <%# Asleep, the screen stays up until the next refresh: no clock, since it would show the wrong time. %>
+      <% if live %><div class="time"><%= now.strftime("%H:%M") %></div>
+      <% elsif back %><div class="asleep">Next update<br><%= back.strftime("%H:%M") %></div>
+      <% else %><div class="asleep">As of<br><%= now.strftime("%H:%M") %></div><% end %>
+      <div class="date"><%= (back || now).strftime("%a %-d %B") %></div>
     </div>
     <% if weather %>
       <div class="wx">
-        <div class="big"><%= weather[:now] %>° <span class="feels">feels <%= weather[:feels] %>°</span></div>
+        <% unless back %><div class="big"><%= weather[:now] %>° <span class="feels">feels <%= weather[:feels] %>°</span></div><% end %>
         <% if weather[:min] && weather[:max] %><div><%= weather[:min] %>° – <%= weather[:max] %>°</div>
         <% elsif weather[:max] %><div>High <%= weather[:max] %>°</div><% end %>
         <% if weather[:text] %><div class="wxtext"><%= weather[:text] %></div><% end %>
@@ -79,12 +83,13 @@
     </div>
   <% end %>
 
-  <%# Three rows per journey, then the rest on one line: "then in 20, 35 min", or clock times once any is an hour or more away. %>
+  <%# Three rows per journey, then the rest on one line: "then in 20, 35 min", or clock times once any is an hour or more away.
+      Not live (the Kindle sleeps until its next refresh): clock times only, since "in N min" would go stale. %>
   <% hm = ->(t) { t ? t.strftime("%H:%M") : "—" }
      mins = ->(t) { ((t - now) / 60).floor }
-     inm = ->(t) { (m = mins.(t)) < 1 ? "now" : m < 60 ? "#{m} min" : "#{m / 60} h #{m % 60} min" }
+     inm = ->(t) { !live ? "" : (m = mins.(t)) < 1 ? "now" : m < 60 ? "#{m} min" : "#{m / 60} h #{m % 60} min" }
      more = ->(r) { d = r[:list].drop(3).map { |t| t[:dep] }
-                    d.empty? ? "" : %(<div class="more">#{mins.(d[-1]) < 60 ? "then in #{d.map(&mins).join(", ")} min" : "then #{d.map(&hm).join(", ")}"}</div>) }
+                    d.empty? ? "" : %(<div class="more">#{live && mins.(d[-1]) < 60 ? "then in #{d.map(&mins).join(", ")} min" : "then #{d.map(&hm).join(", ")}"}</div>) }
      note = ->(r) { r[:notes].empty? ? "" : %(<div class="note">⚠ #{ERB::Util.h(r[:notes].join("; "))}</div>) } %>
 
   <h2><%= JOURNEY1_STOPS[0][1] %> → <%= JOURNEY1_STOPS[-1][1] %></h2>

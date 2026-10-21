@@ -15,10 +15,19 @@ if JOURNEY2_STOPS
   want = { list: [{ dep: now + 600, line: "CCN", change: now + 2400, arr: now + 4200, bus: true }], notes: ["Buses replace trains Lid–#{to}"] }
   raise "transfers: got #{got}, want #{want}" unless got == want
   puts "OK transfers"
+
+  # A one-seat ride that leaves first but arrives no earlier than a later trip is dropped.
+  slow = { "legs" => [leg.(1, "T1", from, 5, to, 87)] }
+  fast = { "legs" => [leg.(1, "CCN", from, 12, via, 34), leg.(1, "T1", via, 39, to, 52)] }
+  tie = { "legs" => [leg.(1, "T9", from, 19, via, 56), leg.(1, "T1", via, 60, to, 87)] }
+  define_method(:trips) { |*, **| [slow, fast, tie] }
+  got = transfers[:list].map { |t| t[:line] }
+  raise "dominated trips: got #{got}" unless got == %w[CCN T9]
+  puts "OK slower one-seat ride dropped"
 end
 
-def trains = { list: [1, 2, 3, 5, 10, 20, 30, 40, 50].map { |m| { dep: Time.now + m * 60 + 30, arrivals: [nil] * (JOURNEY1_STOPS.size - 1) } }, notes: [] }
-def transfers = nil
+def trains(*) = { list: [1, 2, 3, 5, 10, 20, 30, 40, 50].map { |m| { dep: Time.now + m * 60 + 30, arrivals: [nil] * (JOURNEY1_STOPS.size - 1) } }, notes: [] }
+def transfers(*) = nil
 page = html(now)
 shown = page.scan(%r{<b>(\d\d:\d\d)</b>}).flatten
 want = [3, 5, 10].map { |m| (now + m * 60 + 30).strftime("%H:%M") }
@@ -27,7 +36,7 @@ raise "no 'then in' line" unless page.include?("then in 20, 30, 40 min")
 puts "OK #{shown}, then in 20, 30, 40 min"
 
 # Long gaps: once any later train is an hour or more away, the "then" line shows clock times.
-def trains = { list: [3, 5, 10, 20, 30, 90].map { |m| { dep: Time.now + m * 60 + 30, arrivals: [nil] * (JOURNEY1_STOPS.size - 1) } }, notes: [] }
+def trains(*) = { list: [3, 5, 10, 20, 30, 90].map { |m| { dep: Time.now + m * 60 + 30, arrivals: [nil] * (JOURNEY1_STOPS.size - 1) } }, notes: [] }
 want = "then " + [20, 30, 90].map { |m| (now + m * 60 + 30).strftime("%H:%M") }.join(", ")
 raise "no '#{want}' line" unless html(now).include?(want)
 puts "OK #{want}"

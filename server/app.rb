@@ -24,13 +24,27 @@ JOURNEY2_STOPS = ENV["JOURNEY2_STOPS"]&.split(",")&.map { |s| s.strip.split(":",
 JOURNEY2_WALK_MIN = Integer(ENV.fetch("JOURNEY2_WALK_MIN", 3))
 LOW_BATT = Integer(ENV.fetch("LOW_BATT", 20)) # at or below this %, and not charging, the dashboard shows a low-battery icon
 BATT_LOG = "/data/battery.csv" # one line per Kindle fetch: time,percent,charging,mAh left,average mA
+STAY_AWAKE = "/data/awake" # touch server/data/awake to keep the Kindle awake (for SSH); it takes effect at its next wake
+
+# Seconds the Kindle should sleep after this fetch; 0 = stay awake, refresh every minute and react to taps.
+# Asleep it draws ~4 mA instead of ~17, but each wake costs ~15 s of Wi-Fi reconnect, so sleeps are long or none.
+# Weekdays 06-11 every minute; 23-06 one sleep, showing the 06:00 departures and forecast (NIGHT); otherwise every 10 min.
+NIGHT = 3600 # a sleep longer than this renders the page as of the wake time
+def sleep_secs(now = Time.now)
+  return 0 if File.exist?(STAY_AWAKE) || ((1..5) === now.wday && (6...11) === now.hour)
+  t = now + 60 # a Kindle that wakes a few seconds early mustn't get a tiny sleep
+  nxt = if t.hour == 23 || t.hour < 6 then d = t.hour == 23 ? t.to_date + 1 : t.to_date; Time.new(d.year, d.month, d.day, 6)
+        else Time.at((t.to_i / 600 + 1) * 600) # Sydney's offset is whole hours, so these are :00, :10, ... local
+        end
+  (nxt - now).round
+end
 
 # Refetched every 10 min. If a fetch fails, the last good result is shown for up to a day,
 # marked stale after 30 min so the screen says "as of HH:MM".
-def weather
+def weather(today = Date.today)
   fetch_weather if !@weather || Time.now - @weather[:at] > 600
   return unless @weather && Time.now - @weather[:at] < 86_400
-  today = Date.today # recomputed per render, so a cache that crosses midnight doesn't show yesterday as today
+  # today is passed per render, so a cache that crosses midnight doesn't show yesterday as today
   t = @weather[:days].find { |d| d[:day] == today }
   @weather.merge(text: t&.dig(:text), min: t&.dig(:min), max: t&.dig(:max),
                  days: @weather[:days].select { |d| d[:day] > today }.first(5), stale: Time.now - @weather[:at] > 1800)
@@ -78,8 +92,9 @@ end
 
 def at(point, kind) = Time.parse(point["#{kind}TimeEstimated"] || point["#{kind}TimePlanned"]).localtime
 
-def trips(from, to, **via) = tfnsw("trip", depArrMacro: "dep", type_origin: "any", name_origin: from, type_destination: "any",
-                                   name_destination: to, calcNumberOfTrips: 8, TfNSWTR: true, **via)["journeys"] # 10 is ~2x slower; 8 leaves spares after the walk filter
+def trips(from, to, from_time, **via) = tfnsw("trip", depArrMacro: "dep", itdDate: from_time.strftime("%Y%m%d"), itdTime: from_time.strftime("%H%M"),
+                                              type_origin: "any", name_origin: from, type_destination: "any",
+                                              name_destination: to, calcNumberOfTrips: 8, TfNSWTR: true, **via)["journeys"] # 10 is ~2x slower; 8 leaves spares after the walk filter
 
 def station(point) = point["name"].split(",").first.delete_suffix(" Station")
 
@@ -113,8 +128,8 @@ def notices(journeys)
 end
 
 # Next trains from the first stop that run through to the last one, with arrival times at the other stops.
-def trains
-  journeys = trips(JOURNEY1_STOPS[0][0], JOURNEY1_STOPS[-1][0])
+def trains(from_time = Time.now)
+  journeys = trips(JOURNEY1_STOPS[0][0], JOURNEY1_STOPS[-1][0], from_time)
   list = journeys.filter_map do |j|
     leg = j["legs"][0]
     next unless j["legs"].size == 1 && leg.dig("transportation", "product", "class") == 1 # one train, no change
@@ -128,9 +143,9 @@ rescue => e
 end
 
 # Next trips on the second journey: when the first train leaves, when the onward service leaves the change stop, and arrival.
-def transfers
+def transfers(from_time = Time.now)
   from, via, to = JOURNEY2_STOPS.map(&:first)
-  journeys = trips(from, to, type_via: "any", name_via: via)
+  journeys = trips(from, to, from_time, type_via: "any", name_via: via)
   list = journeys.map do |j|
     legs = j["legs"].reject { |l| l.dig("transportation", "product", "class").to_i >= 99 } # walks between platforms
     onward = legs.find { |l| l.dig("origin", "parent", "id") == via } || legs[1] # planner may change elsewhere; nil if one train runs through
@@ -138,16 +153,24 @@ def transfers
       change: onward && at(onward["origin"], "departure"), arr: at(legs[-1]["destination"], "arrival"),
       bus: legs.any? { |l| l.dig("transportation", "product", "class") == 5 } } # 5 = bus; Metro (2) or ferry is not a bus
   end
-  { list: list.uniq { |t| t[:dep] }.sort_by { |t| t[:dep] }, notes: notices(journeys) }
+  list = list.uniq { |t| t[:dep] }.sort_by { |t| t[:dep] }
+  # Drop trips that a later one arrives no later than: the planner likes one-seat rides, e.g. a T1 the long way through the city.
+  list = list.reject.with_index { |t, i| list[i + 1..].any? { |u| u[:arr] <= t[:arr] } }
+  { list:, notes: notices(journeys) }
 rescue => e
   warn "transfers: #{e.class}: #{e.message}"
   nil
 end
 
-def html(now = Time.now, batt: nil)
-  direct, change = [Thread.new { trains }, Thread.new { transfers if JOURNEY2_STOPS }].map(&:value) # in parallel: each query takes 1-3 s
-  catchable = ->(r, walk) { r&.merge(list: r[:list].reject { |t| t[:dep] - now < walk * 60 }.first(6)) }
-  TEMPLATE.result_with_hash(now:, batt:, weather:, trains: catchable.(direct, JOURNEY1_WALK_MIN), transfers: catchable.(change, JOURNEY2_WALK_MIN))
+# sleep: how long the Kindle will show this page (0 = it refreshes every minute).
+# Overnight (sleep > NIGHT) the page is for the morning: departures and forecast as of the wake time.
+def html(now = Time.now, batt: nil, sleep: 0)
+  back = Time.at(((now + sleep).to_i + 30) / 60 * 60) if sleep > NIGHT # nearest minute: sleep was worked out a moment before now
+  from = back || now
+  direct, change = [Thread.new { trains(from) }, Thread.new { transfers(from) if JOURNEY2_STOPS }].map(&:value) # in parallel: each query takes 1-3 s
+  catchable = ->(r, walk) { r&.merge(list: r[:list].reject { |t| t[:dep] - from < walk * 60 }.first(6)) }
+  TEMPLATE.result_with_hash(now:, batt:, live: sleep.zero?, back:, weather: weather(from.to_date),
+                            trains: catchable.(direct, JOURNEY1_WALK_MIN), transfers: catchable.(change, JOURNEY2_WALK_MIN))
 end
 
 def render_png(query = "")
@@ -173,7 +196,7 @@ if $0 == __FILE__ # the check_*.rb scripts require this file without starting th
   server.mount_proc("/") do |req, res|
     batt = Integer(req.query["batt"], exception: false)
     res.content_type = "text/html; charset=utf-8"
-    res.body = html(batt: (if req.query["chg"] == "1" then :charging elsif batt && batt <= LOW_BATT then :low end))
+    res.body = html(batt: (if req.query["chg"] == "1" then :charging elsif batt && batt <= LOW_BATT then :low end), sleep: Integer(req.query["sleep"], exception: false) || 0)
   end
   server.mount_proc("/dash.png") do |req, res|
     if (batt = Integer(req.query["batt"], exception: false))
@@ -184,8 +207,10 @@ if $0 == __FILE__ # the check_*.rb scripts require this file without starting th
         warn "battery log: #{e.message}"
       end
     end
+    secs = sleep_secs
+    res["X-Sleep"] = secs.to_s # run.sh reads this with wget -S
     res.content_type = "image/png"
-    res.body = render_png(req.query_string.to_s)
+    res.body = render_png("#{req.query_string}&sleep=#{secs}") # a sleeping screen gets clock times, not "in N min"
   end
   %w[INT TERM].each { |s| trap(s) { server.shutdown } }
   server.start

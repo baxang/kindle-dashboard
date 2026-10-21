@@ -3,6 +3,12 @@
 An old Kindle Paperwhite 2 used as an always-on wall display. A small server renders the dashboard as an
 image, and the Kindle downloads and shows it at the start of every minute.
 
+To save battery, it refreshes every minute only on weekday mornings (06–11). The rest of the time it sleeps
+between refreshes: every 10 minutes by day, and straight through from 23:00 to 06:00, showing the morning's
+first trains and forecast. While it sleeps, the clock is replaced by "As of 14:30" or "Next update 06:00",
+and departures show clock times instead of "in N min". The schedule is `sleep_secs` in `server/app.rb`. A battery lasts
+about 3½ days refreshing every minute, and an estimated week on this schedule.
+
 The screen shows:
 - time and date;
 - current weather and a 5-day forecast from the Bureau of Meteorology (BOM);
@@ -123,7 +129,8 @@ screen size (`W, H` in `app.rb`), touchscreen device and tap coordinates (`run.s
 | To… | Do this |
 |---|---|
 | Start the dashboard | Tap **Dashboard** in the library, or let `emergency.sh` start it ~30 s after boot |
-| Refresh now | Tap anywhere ("Refreshing..." appears) |
+| Refresh now | Tap anywhere ("Refreshing..." appears). Only while awake (weekdays 06–11); a sleeping Kindle ignores taps |
+| Keep it awake (for SSH) | `touch server/data/awake` on the server; it takes effect at the Kindle's next wake. Delete the file to go back to the schedule |
 | Go back to the normal Kindle | Tap the **clock** (top-left), then the **EXIT** button that appears mid-screen within 5 s. Any other tap, or waiting, returns to the dashboard. The Kindle UI takes ~20–30 s to start; this is not a reboot |
 | Turn off auto-start | Delete `emergency.sh` from the Kindle's main folder (over USB) |
 | Recover if it's stuck | Hold power ~20 s to reboot |
@@ -137,7 +144,7 @@ For a wall mount, power it from a phone charger, not a computer: on a computer i
 ssh -p 2222 root@<kindle-ip>   # or add a "Host kindle" entry to ~/.ssh/config
 ```
 
-- The SSH server runs while KOReader is open, and `run.sh` starts it too.
+- The SSH server runs while KOReader is open, and `run.sh` starts it too. It can't be reached while the Kindle sleeps (see *Keep it awake*).
 - The Kindle has no `scp`. Copy files like this:
   ```sh
   ssh kindle 'cat > /mnt/us/dash/run.sh.new' < device/dash/run.sh

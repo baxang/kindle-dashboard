@@ -1,5 +1,6 @@
 #!/bin/sh
 # Always-on dashboard: pull the server-rendered PNG and draw it.
+# Outside the busy hours the server tells it to sleep between refreshes (X-Sleep); taps only work while awake.
 # Tap anywhere to refresh. To exit back to the normal Kindle screen, tap the clock (top-left), then the EXIT
 # button that appears mid-screen: carrying the Kindle touches its corners, rarely its centre.
 # Restart over SSH: kill the run.sh PID (find it via /proc/*/cmdline; `pkill -f` kills your own ssh session).
@@ -13,6 +14,7 @@ CONFIRM_SECS=5  # how long the EXIT button waits for its tap
 FETCH_TIMEOUT=40 # give up on a download after this many seconds without data (a render takes ~1 s, the server allows 30)
 FBINK=/mnt/us/libkh/bin/fbink
 BATT=/sys/class/power_supply/max77696-battery # PW2 fuel gauge
+RTC=/sys/class/rtc/rtc1 # its alarm wakes the Kindle from sleep
 
 # KOReader normally runs the SSH server; keep it up while KOReader is closed.
 # Firewall holes are checked separately: KOReader can remove them while dropbear lives on.
@@ -42,15 +44,31 @@ wait_tap() {
   done
 }
 
+# Suspend for $1 seconds, then wait up to 30 s for Wi-Fi to come back. Taps and SSH don't work meanwhile.
+# Wi-Fi goes off first: left on, the sleeping Kindle drew ~57 mA (more than awake); off, ~4 mA.
+deep_sleep() {
+  lipc-set-prop com.lab126.cmd wirelessEnable 0
+  sleep 3
+  echo 0 > $RTC/wakealarm
+  echo $(($(date +%s) + $1)) > $RTC/wakealarm
+  echo mem > /sys/power/state # returns on the alarm, or on the power button
+  lipc-set-prop com.lab126.cmd wirelessEnable 1
+  i=0
+  until [ "$(lipc-get-prop com.lab126.wifid cmState 2>/dev/null)" = CONNECTED ] || [ $((i += 1)) -gt 30 ]; do sleep 1; done
+}
+
 n=0
 while true; do
   # battery % and charging (1/0): the server logs them and shows a low-battery icon.
   # mAh left and average mA (negative = draining) are only logged, to measure drain.
   q="?batt=$(lipc-get-prop com.lab126.powerd battLevel 2>/dev/null)&chg=$(lipc-get-prop com.lab126.powerd isCharging 2>/dev/null)"
   q="$q&mah=$(cat $BATT/charge_now 2>/dev/null)&ma=$(cat $BATT/current_avg 2>/dev/null)"
-  if wget -q -T $FETCH_TIMEOUT -O /tmp/dash.png "$URL$q"; then
+  # -S writes the response headers to stderr; X-Sleep says how long to sleep (0 = stay awake, refresh every minute)
+  if wget -S -q -T $FETCH_TIMEOUT -O /tmp/dash.png "$URL$q" 2>/tmp/dash.hdr; then
     if [ $((n % FULL_EVERY)) -eq 0 ]; then eips -f -g /tmp/dash.png; else eips -g /tmp/dash.png; fi
     n=$((n + 1))
+    secs=$(grep -i x-sleep: /tmp/dash.hdr | tr -dc 0-9)
+    [ "${secs:-0}" -ge 60 ] && { deep_sleep $secs; continue; }
   else
     echo "$(date) fetch failed"
     eips 2 41 "No connection, retrying..." >/dev/null
